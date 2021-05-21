@@ -1,7 +1,11 @@
 package com.liubin.example
 
-import org.apache.spark.sql.{Dataset, SparkSession}
+import org.apache.spark.sql._
+import org.apache.spark.sql.expressions.Aggregator
 import org.apache.spark.{SparkConf, SparkContext}
+
+import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 object Main {
 
@@ -73,101 +77,106 @@ object Main {
     prodDS.createOrReplaceTempView("prod")
     userVisitDS.createOrReplaceTempView("user_visit")
 
-
-    sparkSession.sql(
-      """
-        |select count(*) from user_visit
-        |""".stripMargin).show()
-
-    // 各个区域的热门商品（点击量）前三名
-    // 并备注每个商品在主要城市种的分布比例
-    // 华北 商品A 1000  北京20%，天津10%，其他70%
-
-    // 城市 - 商品 - 点击数量
-    sparkSession.sql(
-      """
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId
-        |""".stripMargin).show()
-
-    sparkSession.sql(
-      """
-        |select *,row_number() over(partition by cityId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1
-        |""".stripMargin).show()
-    // 城市热门商品 top3
-    sparkSession.sql(
-      """
-        |select * from (
-        |select *,row_number() over(partition by cityId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1 ) t2
-        |where t2.rank < 4
-        |""".stripMargin).show()
-
-    // 连接city
-    sparkSession.sql(
-      """
-        |select t2.*,t3.* from (
-        |select *,row_number() over(partition by cityId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1 ) t2
-        |join city t3 on t3.id  = t2.cityId
-        |where t2.rank < 4
-        |""".stripMargin).show()
-
-    // 地区分类
-    sparkSession.sql(
-      """
-        |select *, row_number() over(partition by area order by t4.num) as area_rank from (
-        |select t2.*,t3.* from (
-        |select *,row_number() over(partition by cityId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1 ) t2
-        |join city t3 on t3.id  = t2.cityId
-        |where t2.rank < 4 ) t4
-        |""".stripMargin).show()
-
-
-    // 地区热门top3
-    sparkSession.sql(
-      """
-        |select * from (
-        |select *, row_number() over(partition by area order by t4.num desc) as area_rank from (
-        |select t2.*,t3.* from (
-        |select *,row_number() over(partition by cityId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1 ) t2
-        |join city t3 on t3.id  = t2.cityId
-        |where t2.rank < 4 ) t4 ) t5
-        |where t5.area_rank < 4
-        |""".stripMargin).show()
-
-    // 拼接商品
-    sparkSession.sql(
-      """
-        |select area,t5.name,t6.name from (
-        |select *, row_number() over(partition by clickProductId order by t4.num desc) as area_rank from (
-        |select t2.*,t3.* from (
-        |select *,row_number() over(partition by clickProductId order by t1.num desc) as rank from (
-        |select cityId,clickProductId,count(*) as num
-        |from user_visit
-        |group by cityId,clickProductId ) t1 ) t2
-        |join city t3 on t3.id  = t2.cityId
-        |where t2.rank < 4 ) t4 ) t5
-        |join prod t6 on t5.clickProductId = t6.id
-        |where t5.area_rank < 4
-        |""".stripMargin).show()
-
     // 太费劲了，去hive里面写了
     // src/main/resources/spark-sql-example.sql
+
+    // 自定义聚合函数
+    sparkSession.udf.register("cityRemark", functions.udaf(new CityRemark))
+    sparkSession.sql(
+      """
+        |SELECT *
+        |FROM (
+        |         SELECT *,
+        |                ROW_NUMBER() OVER (PARTITION BY area ORDER BY area_sum DESC ) AS area_rank
+        |         FROM (
+        |                  SELECT
+        |                      t1.area,
+        |                      t1.p_name,
+        |                      COUNT(*) AS area_sum,
+        |                      cityRemark(c_name) AS city_remark
+        |                  FROM (
+        |                           SELECT
+        |                               u.*,
+        |                               c.name AS c_name,
+        |                               c.area,
+        |                               p.name AS p_name
+        |                           FROM user_visit u
+        |                           JOIN city       c ON c.id = u.cityId
+        |                           JOIN prod       p ON p.id = u.clickProductId
+        |                           WHERE u.clickProductId != -1
+        |                           ) t1
+        |                  GROUP BY t1.area, t1.p_name
+        |                  ) t2
+        |         ) t3
+        |WHERE t3.area_rank <= 3
+        |""".stripMargin).show()
+  }
+
+  case class Buffer(
+                     var total: Long,
+                     var cityMap: mutable.Map[String, Long]
+                   )
+
+  /**
+   * 自定义聚合函数
+   * in:城市名称
+   * buf：[总和点击，Map[(city,sum),(city,sum)]
+   * out：备注信息
+   * */
+  class CityRemark extends Aggregator[String, Buffer, String] {
+    // 缓冲初始化
+    override def zero: Buffer = {
+      Buffer(0, mutable.Map[String, Long]())
+    }
+
+    // 更新buffer
+    override def reduce(b: Buffer, a: String): Buffer = {
+      // 总数
+      b.total += 1
+      // 城市的点击数量
+      val newCnt = b.cityMap.getOrElse(a, 0L) + 1
+      b.cityMap.update(a, newCnt)
+      b
+    }
+
+    // 合并buffer
+    override def merge(b1: Buffer, b2: Buffer): Buffer = {
+      b1.total += b2.total
+      // map合并
+      val map1 = b1.cityMap
+      val map2 = b2.cityMap
+      b1.cityMap = map1.foldLeft(map2) {
+        case (map, (city, sum)) =>
+          val newCnt = map.getOrElse(city, 0L) + sum
+          map.update(city, newCnt)
+          map
+      }
+      b1
+    }
+
+    // 生成统计结果
+    override def finish(reduction: Buffer): String = {
+      val strings = ListBuffer[String]()
+      // 城市集合排序
+      var other = 0.0
+      reduction.cityMap.toList
+        .sortBy(_._2)(Ordering.Long.reverse).take(2).foreach((tuple: (String, Long)) => {
+        val value = tuple._2 * 100 / reduction.total
+        other += value
+        strings.append(f"${tuple._1}:$value%%")
+      })
+
+      val hasMore = reduction.cityMap.size > 2
+      if (hasMore) {
+        strings.append(f"其他:${100 - other}%%")
+      }
+
+      strings.mkString(",")
+    }
+
+    override def bufferEncoder: Encoder[Buffer] = Encoders.product
+
+    override def outputEncoder: Encoder[String] = Encoders.STRING
   }
 
 }
