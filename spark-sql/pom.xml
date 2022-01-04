@@ -11,5 +11,6 @@
 
     <artifactId>spark-sql</artifactId>
 
-
+    <dependencies>
+    </dependencies>
 </project>
