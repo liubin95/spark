@@ -1,4 +1,4 @@
-package com.liubin
+package com.liubin.streaming
 
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -14,7 +14,7 @@ import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
-import scala.collection.JavaConverters._
+import scala.collection.JavaConverters.mapAsJavaMapConverter
 import scala.collection.mutable
 
 object Example {
@@ -111,4 +111,3 @@ object Example {
   case class AdClickCase(st: String, area: String, city: String, user: String, ad: String)
 
 }
-

@@ -1,4 +1,4 @@
-package com.liubin
+package com.liubin.streaming
 
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.DStream

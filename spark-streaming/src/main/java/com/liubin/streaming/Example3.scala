@@ -1,4 +1,4 @@
-package com.liubin
+package com.liubin.streaming
 
 import java.io.{FileWriter, PrintWriter}
 import java.text.SimpleDateFormat
@@ -81,4 +81,3 @@ object Example3 {
   case class AdClickCase(st: String, area: String, city: String, user: String, ad: String)
 
 }
-

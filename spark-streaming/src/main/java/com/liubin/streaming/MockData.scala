@@ -1,4 +1,4 @@
-package com.liubin
+package com.liubin.streaming
 
 import java.util.Properties
 

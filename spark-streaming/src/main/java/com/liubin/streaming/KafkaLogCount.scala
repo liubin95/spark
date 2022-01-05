@@ -1,4 +1,4 @@
-package com.liubin
+package com.liubin.streaming
 
 import java.sql.DriverManager
 import java.text.SimpleDateFormat
@@ -133,4 +133,3 @@ object KafkaLogCount {
                     )
 
 }
-

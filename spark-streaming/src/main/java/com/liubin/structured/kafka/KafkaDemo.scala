@@ -1,6 +1,6 @@
 package com.liubin.structured.kafka
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 
 object KafkaDemo {
 
@@ -15,21 +15,20 @@ object KafkaDemo {
     val df = spark
       .readStream
       .format("kafka")
-      .option("kafka.bootstrap.servers", "172.25.203.166:9092")
+      .option("kafka.bootstrap.servers", "172.26.182.89" + ":9092")
       .option("subscribe", "dev-log")
       .load()
     //处理数据
-    import spark.implicits._
-    val kafka = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
-      .as[(String, String)]
+    val kafka: DataFrame = df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
 
     // 输出模式
     kafka.writeStream
-      .format("console")
-      .outputMode("append")
+      .format("kafka")
+      .option("kafka.bootstrap.servers", "172.26.182.89" + ":9092")
+      .option("topic", "dev-log-new")
+      .option("checkpointLocation", "output/ckp" + System.currentTimeMillis())
       .start()
       .awaitTermination()
-
 
     spark.close()
   }
