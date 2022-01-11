@@ -15,8 +15,6 @@ object ALSModeling {
       .builder
       .master("local[*]")
       .appName("ALSModeling")
-      .config("spark.local.dir", "temp")
-      .config("spark.sql.shuffle.partitions", "4")
       .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     import spark.implicits._
